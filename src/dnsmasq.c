@@ -1644,8 +1644,6 @@ void clear_cache_and_reload(time_t now)
 #ifdef HAVE_DHCP
   if (daemon->dhcp || daemon->doing_dhcp6)
     {
-      if (option_bool(OPT_ETHERS))
-	dhcp_read_ethers();
       reread_dhcp();
       dhcp_update_configs(daemon->dhcp_conf);
       lease_update_from_configs(); 

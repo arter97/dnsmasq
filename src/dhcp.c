@@ -857,6 +857,7 @@ int address_allocate(struct dhcp_context *context,
   return 0;
 }
 
+#if 0
 void dhcp_read_ethers(void)
 {
   FILE *f = fopen(ETHERSFILE, "r");
@@ -1017,7 +1018,7 @@ void dhcp_read_ethers(void)
 
   my_syslog(MS_DHCP | LOG_INFO, _("read %s - %d addresses"), ETHERSFILE, count);
 }
-
+#endif
 
 /* If we've not found a hostname any other way, try and see if there's one in /etc/hosts
    for this address. If it has a domain part, that must match the set domain and
