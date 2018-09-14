@@ -165,7 +165,7 @@ RESOLVFILE
 
 #define HAVE_DHCP
 #define HAVE_DHCP6 
-#define HAVE_TFTP
+// #define HAVE_TFTP
 #define HAVE_SCRIPT
 #define HAVE_AUTH
 #define HAVE_IPSET 
