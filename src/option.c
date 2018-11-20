@@ -4743,7 +4743,6 @@ void read_opts(int argc, char **argv, char *compile_opts)
   daemon->default_resolv.name = RESOLVFILE;
   daemon->resolv_files = &daemon->default_resolv;
   daemon->username = CHUSER;
-  daemon->runfile =  RUNFILE;
   daemon->dhcp_max = MAXLEASES;
   daemon->tftp_max = TFTP_MAX_CONNECTIONS;
   daemon->edns_pktsz = EDNS_PKTSZ;
