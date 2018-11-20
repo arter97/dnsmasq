@@ -24,8 +24,9 @@ MANDIR        = $(PREFIX)/share/man
 LOCALEDIR     = $(PREFIX)/share/locale
 BUILDDIR      = $(SRC)
 DESTDIR       = 
-CFLAGS        = -Wall -W -O2
-LDFLAGS       = 
+CC            = aarch64-linux-android-clang
+CFLAGS        = -Wall -W  -flto -O3 -march=armv8-a -mtune=cortex-a57 -fPIC
+LDFLAGS       = -pie -llog
 COPTS         = 
 RPM_OPT_FLAGS = 
 LIBS          = 
@@ -161,7 +162,7 @@ $(objs): $(copts_conf) $(hdrs)
 	$(CC) $(CFLAGS) $(COPTS) $(i18n) $(build_cflags) $(RPM_OPT_FLAGS) -c $<	
 
 dnsmasq : $(objs)
-	$(CC) $(LDFLAGS) -o $@ $(objs) $(build_libs) $(LIBS) 
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(objs) $(build_libs) $(LIBS) 
 
 dnsmasq.pot : $(objs:.o=.c) $(hdrs)
 	$(XGETTEXT) -d dnsmasq --foreign-user --omit-header --keyword=_ -o $@ -i $(objs:.o=.c)
