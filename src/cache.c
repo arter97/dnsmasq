@@ -1251,7 +1251,6 @@ void cache_reload(void)
 {
   struct crec *cache, **up, *tmp;
   int revhashsz, i, total_size = daemon->cachesize;
-  struct hostsfile *ah;
   struct host_record *hr;
   struct name_list *nl;
   struct cname *a;
@@ -1360,6 +1359,7 @@ void cache_reload(void)
       if (daemon->cachesize > 0)
 	my_syslog(LOG_INFO, _("cleared cache"));
     }
+#if 0
   else
     {
       if (!option_bool(OPT_NO_HOSTS))
@@ -1370,6 +1370,7 @@ void cache_reload(void)
 	if (!(ah->flags & AH_INACTIVE))
 	  total_size = read_hostsfile(ah->fname, ah->index, total_size, (struct crec **)daemon->packet, revhashsz);
     }
+#endif
 
 #ifdef HAVE_INOTIFY
   set_dynamic_inotify(AH_HOSTS, total_size, (struct crec **)daemon->packet, revhashsz);
