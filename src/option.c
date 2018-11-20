@@ -350,6 +350,8 @@ static const struct myoption opts[] =
 #define ARG_USED_CL   OPT_LAST + 2
 #define ARG_USED_FILE OPT_LAST + 3
 
+#undef gettext_noop
+#define gettext_noop(str) NULL
 static struct {
   int opt;
   unsigned int rept;
