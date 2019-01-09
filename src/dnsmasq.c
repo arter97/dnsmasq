@@ -146,7 +146,7 @@ int main (int argc, char **argv)
      open to /dev/null. Normally we'll be started with 0, 1 and 2 open, 
      but it's not guaranteed. By opening /dev/null three times, we 
      ensure that we're not using those fds for real stuff. */
-  for (i = 0; i < max_fd; i++)
+  for (i = 0; i < 16; i++)
     if (i != STDOUT_FILENO && i != STDERR_FILENO && i != STDIN_FILENO)
       close(i);
     else
