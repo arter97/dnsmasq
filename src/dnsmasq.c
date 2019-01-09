@@ -1254,14 +1254,7 @@ static void sig_handler(int sig)
       else if (sig == SIGUSR2)
 	event = EVENT_REOPEN;
       else if (sig == SIGINT)
-	{
-	  /* Handle SIGINT normally in debug mode, so
-	     ctrl-c continues to operate. */
-	  if (option_bool(OPT_DEBUG))
-	    exit(EC_MISC);
-	  else
-	    event = EVENT_TIME;
-	}
+	event = EVENT_TERM;
       else
 	return;
 
