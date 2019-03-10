@@ -11,6 +11,9 @@ version 2.81
 	This fix passes cache entries back from the TCP child process to
 	the main server process, and fixes the problem.
 
+	Support TCP-fastopen (RFC-7413) on both incoming and
+	outgoing TCP connections, if supported and enabled in the OS.
+
 
 version 2.80
 	Add support for RFC 4039 DHCP rapid commit. Thanks to Ashram Method

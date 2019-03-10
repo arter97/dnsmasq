@@ -130,6 +130,7 @@ typedef unsigned long long u64;
 #include <netinet/ip6.h>
 #endif
 #include <netinet/ip_icmp.h>
+#include <netinet/tcp.h>
 #include <sys/uio.h>
 #include <syslog.h>
 #include <dirent.h>
