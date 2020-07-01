@@ -67,6 +67,8 @@ int main (int argc, char **argv)
   int tftp_prefix_missing = 0;
 #endif
 
+  prctl(PR_SET_PDEATHSIG, SIGKILL);
+
 #ifdef LOCALEDIR
   setlocale(LC_ALL, "");
   bindtextdomain("dnsmasq", LOCALEDIR); 
