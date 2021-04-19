@@ -1,4 +1,4 @@
-/* dnsmasq is Copyright (c) 2000-2020 Simon Kelley
+/* dnsmasq is Copyright (c) 2000-2021 Simon Kelley
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -29,7 +29,6 @@
 #define UDP_TEST_TIME 60 /* How often to reset our idea of max packet size. */
 #define SERVERS_LOGGED 30 /* Only log this many servers when logging state */
 #define LOCALS_LOGGED 8 /* Only log this many local addresses when logging state */
-#define RANDOM_SOCKS 64 /* max simultaneous random ports */
 #define LEASE_RETRY 60 /* on error, retry writing leasefile after LEASE_RETRY seconds */
 #define CACHESIZ 150 /* default cache size */
 #define TTL_FLOOR_LIMIT 3600 /* don't allow --min-cache-ttl to raise TTL above this under any circumstances */
@@ -40,9 +39,11 @@
 #define DHCP_PACKET_MAX 16384 /* hard limit on DHCP packet size */
 #define SMALLDNAME 50 /* most domain names are smaller than this */
 #define CNAME_CHAIN 10 /* chains longer than this atr dropped for loop protection */
+#define DNSSEC_MIN_TTL 60 /* DNSKEY and DS records in cache last at least this long */
 #define HOSTSFILE "/etc/hosts"
 #define ETHERSFILE "/etc/ethers"
-#define DEFLEASE 3600 /* default lease time, 1 hour */
+#define DEFLEASE 3600 /* default DHCPv4 lease time, one hour */
+#define DEFLEASE6 (3600*24) /* default lease time for DHCPv6. One day. */
 #define CHUSER "nobody"
 #define CHGRP "dip"
 #define TFTP_MAX_CONNECTIONS 50 /* max simultaneous connections */
@@ -118,6 +119,9 @@ HAVE_AUTH
    define this to include the facility to act as an authoritative DNS
    server for one or more zones.
 
+HAVE_CRYPTOHASH
+   include just hash function from crypto library, but no DNSSEC.
+
 HAVE_DNSSEC
    include DNSSEC validator.
 
@@ -185,6 +189,7 @@ RESOLVFILE
 /* #define HAVE_IDN */
 /* #define HAVE_LIBIDN2 */
 /* #define HAVE_CONNTRACK */
+/* #define HAVE_CRYPTOHASH */
 /* #define HAVE_DNSSEC */
 
 
@@ -418,6 +423,10 @@ static char *compile_opts =
 "no-"
 #endif
 "auth "
+#if !defined(HAVE_CRYPTOHASH) && !defined(HAVE_DNSSEC)
+"no-"
+#endif
+"cryptohash "
 #ifndef HAVE_DNSSEC
 "no-"
 #endif

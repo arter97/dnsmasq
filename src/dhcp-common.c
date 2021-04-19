@@ -1,4 +1,4 @@
-/* dnsmasq is Copyright (c) 2000-2020 Simon Kelley
+/* dnsmasq is Copyright (c) 2000-2021 Simon Kelley
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -38,7 +38,7 @@ void dhcp_common_init(void)
 
 ssize_t recv_dhcp_packet(int fd, struct msghdr *msg)
 {  
-  ssize_t sz;
+  ssize_t sz, new_sz;
  
   while (1)
     {
@@ -65,9 +65,18 @@ ssize_t recv_dhcp_packet(int fd, struct msghdr *msg)
 	}
     }
   
-  while ((sz = recvmsg(fd, msg, 0)) == -1 && errno == EINTR);
+  while ((new_sz = recvmsg(fd, msg, 0)) == -1 && errno == EINTR);
+
+  /* Some kernels seem to ignore MSG_PEEK, and dequeue the packet anyway. 
+     If that happens we get EAGAIN here because the socket is non-blocking.
+     Use the result of the original testing recvmsg as long as the buffer
+     was big enough. There's a small race here that may lose the odd packet,
+     but it's UDP anyway. */
   
-  return (msg->msg_flags & MSG_TRUNC) ? -1 : sz;
+  if (new_sz == -1 && (errno == EWOULDBLOCK || errno == EAGAIN))
+    new_sz = sz;
+  
+  return (msg->msg_flags & MSG_TRUNC) ? -1 : new_sz;
 }
 
 struct dhcp_netid *run_tag_if(struct dhcp_netid *tags)
@@ -271,31 +280,29 @@ static int is_config_in_context(struct dhcp_context *context, struct dhcp_config
 {
   if (!context) /* called via find_config() from lease_update_from_configs() */
     return 1; 
+
+  if (!(config->flags & (CONFIG_ADDR | CONFIG_ADDR6)))
+    return 1;
   
 #ifdef HAVE_DHCP6
   if (context->flags & CONTEXT_V6)
     {
        struct addrlist *addr_list;
 
-       if (!(config->flags & CONFIG_ADDR6))
-	 return 1;
-       
-        for (; context; context = context->current)
-	  for (addr_list = config->addr6; addr_list; addr_list = addr_list->next)
-	    {
-	      if ((addr_list->flags & ADDRLIST_WILDCARD) && context->prefix == 64)
-		return 1;
-	      
-	      if (is_same_net6(&addr_list->addr.addr6, &context->start6, context->prefix))
-		return 1;
-	    }
+       if (config->flags & CONFIG_ADDR6)
+	 for (; context; context = context->current)
+	   for (addr_list = config->addr6; addr_list; addr_list = addr_list->next)
+	     {
+	       if ((addr_list->flags & ADDRLIST_WILDCARD) && context->prefix == 64)
+		 return 1;
+	       
+	       if (is_same_net6(&addr_list->addr.addr6, &context->start6, context->prefix))
+		 return 1;
+	     }
     }
   else
 #endif
     {
-      if (!(config->flags & CONFIG_ADDR))
-	return 1;
-      
       for (; context; context = context->current)
 	if ((config->flags & CONFIG_ADDR) && is_same_net(config->addr, context->start, context->netmask))
 	  return 1;
