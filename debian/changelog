@@ -1,3 +1,34 @@
+dnsmasq (2.89-1) unstable; urgency=low
+
+   * New upstream.
+
+ -- Simon Kelley <simon@thekelleys.org.uk>  Fri, 13 Jan 2023 21:57:01 +0000
+
+dnsmasq (2.88-1) unstable; urgency=low
+
+   * New upstream.
+   * Fix loss of server configuration (closes: #1020830)
+     Git commit 930428fb970f4991e5c2933fd5a5d2504c18a551
+
+ -- Simon Kelley <simon@thekelleys.org.uk>  Wed, 2 Nov 2022 22:15:45 +0000
+
+dnsmasq (2.87-1) unstable; urgency=low
+
+   * New upstream. (closes: #1001209, #1003156)
+   * Include new NFTset support in the build.
+   * Fix crash on netboot with DNS server disabled. (closes: #996332)
+   * Fix rare lockup in DNSSEC. (closes: #1001576)
+   * Close old bug. (closes: #902963)
+
+ -- Simon Kelley <simon@thekelleys.org.uk>  Wed, 25 Sep 2022 23:11:25 +0000
+
+dnsmasq (2.86-1.1) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * Fix --address=/#/...... which was lost in 2.86. (closes: #995655)
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 10 Nov 2021 22:05:45 +0100
+
 dnsmasq (2.86-1) unstable; urgency=low
 
    * Fix debian/changelog format error. (closes: #986626)

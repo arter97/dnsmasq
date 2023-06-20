@@ -1,4 +1,4 @@
-/* dnsmasq is Copyright (c) 2000-2021 Simon Kelley
+/* dnsmasq is Copyright (c) 2000-2022 Simon Kelley
  
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -14,7 +14,7 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#define COPYRIGHT "Copyright (c) 2000-2021 Simon Kelley"
+#define COPYRIGHT "Copyright (c) 2000-2022 Simon Kelley"
 
 /* We do defines that influence behavior of stdio.h, so complain
    if included too early. */
@@ -133,6 +133,7 @@ typedef unsigned long long u64;
 #include <sys/uio.h>
 #include <syslog.h>
 #include <dirent.h>
+#include <netdb.h>
 #ifndef HAVE_LINUX_NETWORK
 #  include <net/if_dl.h>
 #endif
@@ -275,7 +276,13 @@ struct event_desc {
 #define OPT_UMBRELLA_DEVID 64
 #define OPT_CMARK_ALST_EN  65
 #define OPT_QUIET_TFTP     66
-#define OPT_LAST           67
+#define OPT_FILTER_A       67
+#define OPT_FILTER_AAAA    68
+#define OPT_STRIP_ECS      69
+#define OPT_STRIP_MAC      70
+#define OPT_NORR           71
+#define OPT_NO_IDENT       72
+#define OPT_LAST           73
 
 #define OPTION_BITS (sizeof(unsigned int)*8)
 #define OPTION_SIZE ( (OPT_LAST/OPTION_BITS)+((OPT_LAST%OPTION_BITS)!=0) )
@@ -506,6 +513,7 @@ struct crec {
 #define F_DOMAINSRV (1u<<28)
 #define F_RCODE     (1u<<29)
 #define F_SRV       (1u<<30)
+#define F_STALE     (1u<<31)
 
 #define UID_NONE      0
 /* Values of uid in crecs with F_CONFIG bit set. */
@@ -530,23 +538,23 @@ union mysockaddr {
 
 
 /* The actual values here matter, since we sort on them to get records in the order
-   IPv6 addr, IPv4 addr, all zero return, no-data return, send upstream. */
-#define SERV_LITERAL_ADDRESS   1  /* addr is the answer, or NoDATA is the answer, depending on the next three flags */
-#define SERV_ALL_ZEROS         2  /* return all zeros for A and AAAA */
-#define SERV_4ADDR             4  /* addr is IPv4 */
-#define SERV_6ADDR             8  /* addr is IPv6 */
-#define SERV_HAS_SOURCE       16  /* source address defined */
-#define SERV_FOR_NODOTS       32  /* server for names with no domain part only */
-#define SERV_WARNED_RECURSIVE 64  /* avoid warning spam */
-#define SERV_FROM_DBUS       128  /* 1 if source is DBus */
-#define SERV_MARK            256  /* for mark-and-delete and log code */
-#define SERV_WILDCARD        512  /* domain has leading '*' */ 
-#define SERV_USE_RESOLV     1024  /* forward this domain in the normal way */
-#define SERV_FROM_RESOLV    2048  /* 1 for servers from resolv, 0 for command line. */
-#define SERV_FROM_FILE      4096  /* read from --servers-file */
-#define SERV_LOOP           8192  /* server causes forwarding loop */
-#define SERV_DO_DNSSEC     16384  /* Validate DNSSEC when using this server */
-#define SERV_GOT_TCP       32768  /* Got some data from the TCP connection */
+   IPv6 addr, IPv4 addr, all zero return, resolvconf servers, upstream server, no-data return  */
+#define SERV_LITERAL_ADDRESS    1  /* addr is the answer, or NoDATA is the answer, depending on the next four flags */
+#define SERV_USE_RESOLV         2  /* forward this domain in the normal way */
+#define SERV_ALL_ZEROS          4  /* return all zeros for A and AAAA */
+#define SERV_4ADDR              8  /* addr is IPv4 */
+#define SERV_6ADDR             16  /* addr is IPv6 */
+#define SERV_HAS_SOURCE        32  /* source address defined */
+#define SERV_FOR_NODOTS        64  /* server for names with no domain part only */
+#define SERV_WARNED_RECURSIVE 128  /* avoid warning spam */
+#define SERV_FROM_DBUS        256  /* 1 if source is DBus */
+#define SERV_MARK             512  /* for mark-and-delete and log code */
+#define SERV_WILDCARD        1024  /* domain has leading '*' */ 
+#define SERV_FROM_RESOLV     2048  /* 1 for servers from resolv, 0 for command line. */
+#define SERV_FROM_FILE       4096  /* read from --servers-file */
+#define SERV_LOOP            8192  /* server causes forwarding loop */
+#define SERV_DO_DNSSEC      16384  /* Validate DNSSEC when using this server */
+#define SERV_GOT_TCP        32768  /* Got some data from the TCP connection */
 
 struct serverfd {
   int fd;
@@ -580,7 +588,8 @@ struct server {
   struct serverfd *sfd; 
   int tcpfd, edns_pktsz;
   time_t pktsz_reduced;
-  unsigned int queries, failed_queries;
+  unsigned int queries, failed_queries, nxdomain_replies, retrys;
+  unsigned int query_latency, mma_latency;
   time_t forwardtime;
   int forwardcount;
 #ifdef HAVE_LOOP
@@ -607,6 +616,11 @@ struct serv_local {
   u16 flags, domain_len;
   char *domain;
   struct server *next;
+};
+
+struct rebind_domain {
+  char *domain;
+  struct rebind_domain *next;
 };
 
 struct ipsets {
@@ -656,6 +670,7 @@ struct resolvc {
   struct resolvc *next;
   int is_default, logged;
   time_t mtime;
+  ino_t ino;
   char *name;
 #ifdef HAVE_INOTIFY
   int wd; /* inotify watch descriptor */
@@ -674,21 +689,32 @@ struct hostsfile {
   struct hostsfile *next;
   int flags;
   char *fname;
-#ifdef HAVE_INOTIFY
-  int wd; /* inotify watch descriptor */
-#endif
   unsigned int index; /* matches to cache entries for logging */
 };
 
+struct dyndir {
+  struct dyndir *next;
+  struct hostsfile *files;
+  int flags;
+  char *dname;
+#ifdef HAVE_INOTIFY
+  int wd; /* inotify watch descriptor */
+#endif
+};
+
 /* packet-dump flags */
-#define DUMP_QUERY     0x0001
-#define DUMP_REPLY     0x0002
-#define DUMP_UP_QUERY  0x0004
-#define DUMP_UP_REPLY  0x0008
-#define DUMP_SEC_QUERY 0x0010
-#define DUMP_SEC_REPLY 0x0020
-#define DUMP_BOGUS     0x0040
-#define DUMP_SEC_BOGUS 0x0080
+#define DUMP_QUERY         0x0001
+#define DUMP_REPLY         0x0002
+#define DUMP_UP_QUERY      0x0004 
+#define DUMP_UP_REPLY      0x0008
+#define DUMP_SEC_QUERY     0x0010
+#define DUMP_SEC_REPLY     0x0020
+#define DUMP_BOGUS         0x0040 
+#define DUMP_SEC_BOGUS     0x0080
+#define DUMP_DHCP          0x1000
+#define DUMP_DHCPV6        0x2000
+#define DUMP_RA            0x4000
+#define DUMP_TFTP          0x8000
 
 /* DNSSEC status values. */
 #define STAT_SECURE             0x10000
@@ -715,7 +741,7 @@ struct hostsfile {
 
 #define FREC_NOREBIND           1
 #define FREC_CHECKING_DISABLED  2
-#define FREC_HAS_SUBNET         4
+#define FREC_NO_CACHE           4
 #define FREC_DNSKEY_QUERY       8
 #define FREC_DS_QUERY          16
 #define FREC_AD_QUESTION       32
@@ -724,7 +750,6 @@ struct hostsfile {
 #define FREC_TEST_PKTSZ       256
 #define FREC_HAS_EXTRADATA    512
 #define FREC_HAS_PHEADER     1024
-#define FREC_NO_CACHE        2048
 
 #define HASH_SIZE 32 /* SHA-256 digest size */
 
@@ -742,11 +767,13 @@ struct frec {
   unsigned short new_id;
   int forwardall, flags;
   time_t time;
+  u32 forward_timestamp;
+  int forward_delay;
   unsigned char *hash[HASH_SIZE];
-#ifdef HAVE_DNSSEC 
-  int class, work_counter;
   struct blockdata *stash; /* Saved reply, whilst we validate */
   size_t stash_len;
+#ifdef HAVE_DNSSEC 
+  int class, work_counter;
   struct frec *dependent; /* Query awaiting internally-generated DNSKEY or DS query */
   struct frec *next_dependent; /* list of above. */
   struct frec *blocking_query; /* Query which is blocking us. */
@@ -771,6 +798,7 @@ struct frec {
 #define ACTION_TFTP          5
 #define ACTION_ARP           6
 #define ACTION_ARP_DEL       7
+#define ACTION_RELAY_SNOOP   8
 
 #define LEASE_NEW            1  /* newly created */
 #define LEASE_CHANGED        2  /* modified */
@@ -962,6 +990,8 @@ struct dhcp_bridge {
 
 struct cond_domain {
   char *domain, *prefix; /* prefix is text-prefix on domain name */
+  char *interface;       /* These two set when domain comes from interface. */
+  struct addrlist *al;
   struct in_addr start, end;
   struct in6_addr start6, end6;
   int is6, indexed, prefixlen;
@@ -1069,7 +1099,15 @@ struct dhcp_relay {
   union all_addr local, server;
   char *interface; /* Allowable interface for replies from server, and dest for IPv6 multicast */
   int iface_index; /* working - interface in which requests arrived, for return */
-  struct dhcp_relay *current, *next;
+  int port;        /* Port of relay we forward to. */
+#ifdef HAVE_SCRIPT
+  struct snoop_record {
+    struct in6_addr client, prefix;
+    int prefix_len;
+    struct snoop_record *next;
+  } *snoop_records;
+#endif
+  struct dhcp_relay *next;
 };
 
 extern struct daemon {
@@ -1105,15 +1143,17 @@ extern struct daemon {
   char *lease_change_command;
   struct iname *if_names, *if_addrs, *if_except, *dhcp_except, *auth_peers, *tftp_interfaces;
   struct bogus_addr *bogus_addr, *ignore_addr;
-  struct server *servers, *local_domains, **serverarray, *no_rebind;
+  struct server *servers, *servers_tail, *local_domains, **serverarray;
+  struct rebind_domain *no_rebind;
   int server_has_wildcard;
   int serverarraysz, serverarrayhwm;
-  struct ipsets *ipsets;
+  struct ipsets *ipsets, *nftsets;
   u32 allowlist_mask;
   struct allowlist *allowlists;
   int log_fac; /* log facility */
   char *log_file; /* optional log file */
   int max_logs;  /* queue limit */
+  int randport_limit; /* Maximum number of source ports for query. */
   int cachesize, ftabsize;
   int port, query_port, min_port, max_port;
   unsigned long local_ttl, neg_ttl, max_ttl, min_cache_ttl, max_cache_ttl, auth_ttl, dhcp_ttl, use_dhcp_ttl;
@@ -1121,6 +1161,7 @@ extern struct daemon {
   u32 umbrella_org;
   u32 umbrella_asset;
   u8 umbrella_device[8];
+  int host_index;
   struct hostsfile *addn_hosts;
   struct dhcp_context *dhcp, *dhcp6;
   struct ra_interface *ra_interfaces;
@@ -1141,7 +1182,8 @@ extern struct daemon {
   int doing_ra, doing_dhcp6;
   struct dhcp_netid_list *dhcp_ignore, *dhcp_ignore_names, *dhcp_gen_names; 
   struct dhcp_netid_list *force_broadcast, *bootp_dynamic;
-  struct hostsfile *dhcp_hosts_file, *dhcp_opts_file, *dynamic_dirs;
+  struct hostsfile *dhcp_hosts_file, *dhcp_opts_file;
+  struct dyndir *dynamic_dirs;
   int dhcp_max, tftp_max, tftp_mtu;
   int dhcp_server_port, dhcp_client_port;
   int start_tftp_port, end_tftp_port; 
@@ -1158,6 +1200,8 @@ extern struct daemon {
   int dump_mask;
   unsigned long soa_sn, soa_refresh, soa_retry, soa_expiry;
   u32 metrics[__METRIC_MAX];
+  int fast_retry_time, fast_retry_timeout;
+  int cache_max_expiry;
 #ifdef HAVE_DNSSEC
   struct ds_config *ds;
   char *timestamp_file;
@@ -1167,9 +1211,12 @@ extern struct daemon {
   char *packet; /* packet buffer */
   int packet_buff_sz; /* size of above */
   char *namebuff; /* MAXDNAME size buffer */
+#if (defined(HAVE_CONNTRACK) && defined(HAVE_UBUS)) || defined(HAVE_DNSSEC)
+  /* CONNTRACK UBUS code uses this buffer, as well as DNSSEC code. */
+  char *workspacename;
+#endif
 #ifdef HAVE_DNSSEC
   char *keyname; /* MAXDNAME size buffer */
-  char *workspacename; /* ditto */
   unsigned long *rr_status; /* ceiling in TTL from DNSSEC or zero for insecure */
   int rr_status_sz;
   int dnssec_no_time_check;
@@ -1216,13 +1263,18 @@ extern struct daemon {
   unsigned char *duid;
   struct iovec outpacket;
   int dhcp6fd, icmp6fd;
+#  ifdef HAVE_SCRIPT
+  struct snoop_record *free_snoops;
+#  endif
 #endif
+  
   /* DBus stuff */
   /* void * here to avoid depending on dbus headers outside dbus.c */
   void *dbus;
 #ifdef HAVE_DBUS
   struct watch *watches;
 #endif
+
   /* UBus stuff */
 #ifdef HAVE_UBUS
   /* void * here to avoid depending on ubus headers outside ubus.c */
@@ -1242,12 +1294,19 @@ extern struct daemon {
 #endif
 } *daemon;
 
+struct server_details {
+  union mysockaddr *addr, *source_addr;
+  struct addrinfo *hostinfo, *orig_hostinfo;
+  char *interface, *source, *scope_id, *interface_opt;
+  int serv_port, source_port, addr_type, scope_index, valid;
+  u16 *flags;
+};
+
 /* cache.c */
 void cache_init(void);
 void next_uid(struct crec *crecp);
-void log_query(unsigned int flags, char *name, union all_addr *addr, char *arg); 
+void log_query(unsigned int flags, char *name, union all_addr *addr, char *arg, unsigned short type); 
 char *record_source(unsigned int index);
-char *querystr(char *desc, unsigned short type);
 int cache_find_non_terminal(char *name, time_t now);
 struct crec *cache_find_by_addr(struct crec *crecp,
 				union all_addr *addr, time_t now, 
@@ -1256,6 +1315,7 @@ struct crec *cache_find_by_name(struct crec *crecp,
 				char *name, time_t now, unsigned int prot);
 void cache_end_insert(void);
 void cache_start_insert(void);
+unsigned int cache_remove_uid(const unsigned int uid);
 int cache_recv_insert(time_t now, int fd);
 struct crec *cache_insert(char *name, union all_addr *addr, unsigned short class, 
 			  time_t now, unsigned long ttl, unsigned int flags);
@@ -1298,14 +1358,15 @@ unsigned int extract_request(struct dns_header *header, size_t qlen,
 			       char *name, unsigned short *typep);
 void setup_reply(struct dns_header *header, unsigned int flags, int ede);
 int extract_addresses(struct dns_header *header, size_t qlen, char *name,
-		      time_t now, char **ipsets, int is_sign, int check_rebind,
-		      int no_cache_dnssec, int secure, int *doctored);
+		      time_t now, struct ipsets *ipsets, struct ipsets *nftsets, int is_sign,
+                      int check_rebind, int no_cache_dnssec, int secure, int *doctored);
 #if defined(HAVE_CONNTRACK) && defined(HAVE_UBUS)
 void report_addresses(struct dns_header *header, size_t len, u32 mark);
 #endif
 size_t answer_request(struct dns_header *header, char *limit, size_t qlen,  
 		      struct in_addr local_addr, struct in_addr local_netmask, 
-		      time_t now, int ad_reqd, int do_bit, int have_pseudoheader);
+		      time_t now, int ad_reqd, int do_bit, int have_pseudoheader,
+		      int *stale);
 int check_for_bogus_wildcard(struct dns_header *header, size_t qlen, char *name, 
 			     time_t now);
 int check_for_ignored_address(struct dns_header *header, size_t qlen);
@@ -1364,11 +1425,15 @@ void *safe_malloc(size_t size);
 void safe_strncpy(char *dest, const char *src, size_t size);
 void safe_pipe(int *fd, int read_noblock);
 void *whine_malloc(size_t size);
+void *whine_realloc(void *ptr, size_t size);
 int sa_len(union mysockaddr *addr);
 int sockaddr_isequal(const union mysockaddr *s1, const union mysockaddr *s2);
+int sockaddr_isnull(const union mysockaddr *s);
+int hostname_order(const char *a, const char *b);
 int hostname_isequal(const char *a, const char *b);
 int hostname_issubdomain(char *a, char *b);
 time_t dnsmasq_time(void);
+u32 dnsmasq_milliseconds(void);
 int netmask_length(struct in_addr mask);
 int is_same_net(struct in_addr a, struct in_addr b, struct in_addr mask);
 int is_same_net_prefix(struct in_addr a, struct in_addr b, int prefix);
@@ -1412,8 +1477,9 @@ void read_servers_file(void);
 void set_option_bool(unsigned int opt);
 void reset_option_bool(unsigned int opt);
 struct hostsfile *expand_filelist(struct hostsfile *list);
-char *parse_server(char *arg, union mysockaddr *addr, 
-		   union mysockaddr *source_addr, char *interface, u16 *flags);
+char *parse_server(char *arg, struct server_details *sdetails);
+char *parse_server_addr(struct server_details *sdetails);
+int parse_server_next(struct server_details *sdetails);
 int option_read_dynfile(char *file, int flags);
 
 /* forward.c */
@@ -1428,6 +1494,7 @@ int send_from(int fd, int nowild, char *packet, size_t len,
 void resend_query(void);
 int allocate_rfd(struct randfd_list **fdlp, struct server *serv);
 void free_rfds(struct randfd_list **fdlp);
+int fast_retry(time_t now);
 
 /* network.c */
 int indextoname(int fd, int index, char *name);
@@ -1582,6 +1649,12 @@ void ipset_init(void);
 int add_to_ipset(const char *setname, const union all_addr *ipaddr, int flags, int remove);
 #endif
 
+/* nftset.c */
+#ifdef HAVE_NFTSET
+void nftset_init(void);
+int add_to_nftset(const char *setpath, const union all_addr *ipaddr, int flags, int remove);
+#endif
+
 /* pattern.c */
 #ifdef HAVE_CONNTRACK
 int is_valid_dns_name(const char *value);
@@ -1601,6 +1674,9 @@ void queue_tftp(off_t file_len, char *filename, union mysockaddr *peer);
 void queue_arp(int action, unsigned char *mac, int maclen,
 	       int family, union all_addr *addr);
 int helper_buf_empty(void);
+#ifdef HAVE_DHCP6
+void queue_relay_snoop(struct in6_addr *client, int if_index, struct in6_addr *prefix, int prefix_len);
+#endif
 #endif
 
 /* tftp.c */
@@ -1643,10 +1719,13 @@ void get_client_mac(struct in6_addr *client, int iface, unsigned char *mac,
 unsigned short dhcp6_reply(struct dhcp_context *context, int interface, char *iface_name,  
 			   struct in6_addr *fallback, struct in6_addr *ll_addr, struct in6_addr *ula_addr,
 			   size_t sz, struct in6_addr *client_addr, time_t now);
-void relay_upstream6(struct dhcp_relay *relay, ssize_t sz, struct in6_addr *peer_address, 
+int relay_upstream6(int iface_index, ssize_t sz, struct in6_addr *peer_address, 
 		     u32 scope_id, time_t now);
 
-unsigned short relay_reply6( struct sockaddr_in6 *peer, ssize_t sz, char *arrival_interface);
+int relay_reply6( struct sockaddr_in6 *peer, ssize_t sz, char *arrival_interface);
+#  ifdef HAVE_SCRIPT
+int do_snoop_script_run(void);
+#  endif
 #endif
 
 /* dhcp-common.c */
@@ -1673,7 +1752,7 @@ struct dhcp_config *find_config(struct dhcp_config *configs,
 int config_has_mac(struct dhcp_config *config, unsigned char *hwaddr, int len, int type);
 #ifdef HAVE_LINUX_NETWORK
 char *whichdevice(void);
-void bindtodevice(char *device, int fd);
+int bind_dhcp_devices(char *bound_device);
 #endif
 #  ifdef HAVE_DHCP6
 void display_opts6(void);
@@ -1734,7 +1813,11 @@ int do_poll(int timeout);
 size_t rrfilter(struct dns_header *header, size_t plen, int mode);
 u16 *rrfilter_desc(int type);
 int expand_workspace(unsigned char ***wkspc, int *szp, int new);
-
+/* modes. */
+#define RRFILTER_EDNS0   0
+#define RRFILTER_DNSSEC  1
+#define RRFILTER_A       2
+#define RRFILTER_AAAA    3
 /* edns0.c */
 unsigned char *find_pseudoheader(struct dns_header *header, size_t plen,
 				   size_t *len, unsigned char **p, int *is_sign, int *is_last);
@@ -1742,7 +1825,7 @@ size_t add_pseudoheader(struct dns_header *header, size_t plen, unsigned char *l
 			unsigned short udp_sz, int optno, unsigned char *opt, size_t optlen, int set_do, int replace);
 size_t add_do_bit(struct dns_header *header, size_t plen, unsigned char *limit);
 size_t add_edns0_config(struct dns_header *header, size_t plen, unsigned char *limit, 
-			union mysockaddr *source, time_t now, int *check_subnet, int *cacheable);
+			union mysockaddr *source, time_t now, int *cacheable);
 int check_source(struct dns_header *header, size_t plen, unsigned char *pseudoheader, union mysockaddr *peer);
 
 /* arp.c */
@@ -1752,7 +1835,10 @@ int do_arp_script_run(void);
 /* dump.c */
 #ifdef HAVE_DUMPFILE
 void dump_init(void);
-void dump_packet(int mask, void *packet, size_t len, union mysockaddr *src, union mysockaddr *dst);
+void dump_packet_udp(int mask, void *packet, size_t len, union mysockaddr *src,
+		     union mysockaddr *dst, int fd);
+void dump_packet_icmp(int mask, void *packet, size_t len, union mysockaddr *src,
+		      union mysockaddr *dst);
 #endif
 
 /* domain-match.c */
